@@ -1,0 +1,352 @@
+---
+title: "Exploring the BRFSS data"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  pdf_document: default
+  word_document: default
+---
+
+## Setup
+
+### Set directory
+```{r}
+setwd("/Users/davidmclaughlin/Documents/Programming/Statistics_with_R/Intro_to_Probability_and_Data/BRFSS_data_project")
+```
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+library(usmap)
+library(ggmap)
+library(maps)
+
+```
+
+```{r load-data}
+load("brfss2013.RData")
+```
+
+
+* * *
+
+## Part 1: Data
+
+The Behavioral Risk Factor Surveillance System (BRFSS) is a collection of state-level data about U.S. residents regarding their health-related risk behaviors, chronic health conditions, and use of preventive services. BRFSS is based on more than 400,000 adult interviews conducted by telephone each year. This project analyzes data from 2013.
+
+
+* * *
+
+## Part 2: Research questions
+
+**Research quesion 1:**
+Which states had the highest and lowest instances of poor physical health heatlh and poor mental health? (variables: _state, physhlth, menthlth)
+    
+**Research quesion 2:**
+Which states had the highest and lowest proportion of people ages 18-64 without insurance and is there a relationship between having insurance and experiencing poor physical health? (variables: X_state, X_hcvu651, physhlth) 
+
+**Research quesion 3:**
+Do married people have more or fewer number of days of poor mental health?  (variables: marital, menthlth)
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+**Research quesion 1:**
+Which states had the highest and lowest instances of poor physical health heatlh and poor mental health? (variables: _state, physhlth, menthlth)
+
+```{r}
+
+brfphlth <- brfss2013 %>%
+    select(X_state, physhlth) %>%
+    group_by(X_state) %>%
+    summarise(sum(physhlth, na.rm = TRUE))
+    
+brfstates <- brfss2013 %>%
+    group_by(X_state) %>%
+    count(X_state)
+
+brfphlth <- as.data.frame(brfphlth)
+brfstates <- as.data.frame(brfstates)
+
+statesphlthtemp <- merge(brfphlth, brfstates)
+
+statesphlth <- statesphlthtemp[-c(1,2), ]
+
+statesphlth <- statesphlth %>% 
+    rename("State" = "X_state", "Poor_Phys_Hlth" = "sum(physhlth, na.rm = TRUE)", "Total_Records" = "n") %>%
+    mutate_at(vars(Poor_Phys_Hlth, Total_Records), as.numeric)
+
+statesphlth$Poor_Phys_Hlth_Proportion <- (statesphlth$Poor_Phys_Hlth/statesphlth$Total_Records)
+
+st_crosswalk <- tibble(State = state.name) %>%
+   bind_cols(tibble(Abb = state.abb)) %>% 
+   bind_rows(tibble(State = "District of Columbia", Abb = "DC")) %>%
+   bind_rows(tibble(State = "Puerto Rico", Abb = "PR")) %>%
+   bind_rows(tibble(State = "Guam", Abb = "GU"))
+
+statesphlthmerge <- left_join(statesphlth, st_crosswalk, by = "State")
+
+statesphlth <- statesphlthmerge[, c(5, 2, 3, 4)]
+
+statesphlth <- statesphlth %>% 
+    rename(State = Abb) %>%
+    filter(State != "GU" & State != "PR") %>%
+    arrange(desc(Poor_Phys_Hlth_Proportion))
+
+statesphlth
+
+```
+
+```{r}
+
+
+ggplot(statesphlth) + 
+    geom_bar(aes(x = reorder(State, -Poor_Phys_Hlth_Proportion), y = Poor_Phys_Hlth_Proportion), stat = "identity", width = 0.5) +
+    theme(axis.ticks = element_blank(), axis.text.x = element_text(size = rel(0.5), vjust = 10), axis.text.y = element_text(size = rel(0.8)), plot.subtitle = element_text(size = 7), plot.margin = unit(c(1,1,1,1), "cm"), panel.background = element_blank()) +
+    xlab(NULL) +
+    scale_y_continuous(name = "", limits=c(0, 6)) +
+    labs(title = "State Ranking of Poor Physical Health", subtitle = "Average number of days of poor physical health in the last month per state")
+
+
+```
+
+The results show Alabama had the worst outcome for physical health. Minnesota had the best. 
+
+
+```{r}
+
+states_map <- map_data("state")
+
+st_names <- st_crosswalk %>%
+    rename("State_Name" = "State",
+           "State" = "Abb")
+
+states_add <- left_join(statesphlth, st_names, by = "State")
+
+phlthmod <- states_add[, c(5, 2, 3, 4)] %>%
+    rename("region" = "State_Name") %>%
+    mutate(region = tolower(region))
+
+hlth_map <- left_join(states_map, phlthmod, by = "region")
+
+ggplot(hlth_map, aes(long, lat, group = group)) +
+    geom_polygon(aes(fill = Poor_Phys_Hlth_Proportion), color = "black") +
+    theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        rect = element_blank()) +
+    scale_fill_continuous(name = "Days", low = "yellow", high = "red") + 
+    labs(title = "Average number of days of poor physical health")
+
+
+```
+
+
+```{r}
+
+brfmhlth <- brfss2013 %>%
+    select(X_state, menthlth) %>%
+    group_by(X_state) %>%
+    summarise(sum(menthlth, na.rm = TRUE))
+
+brfmhlth <- as.data.frame(brfmhlth)
+
+statesmhlthtemp <- merge(brfmhlth, brfstates)
+
+statesmhlth <- statesmhlthtemp[-c(1,2), ]
+
+statesmhlth <- statesmhlth %>% 
+    rename("State" = "X_state", "Poor_Ment_Hlth" = "sum(menthlth, na.rm = TRUE)", "Total_Records" = "n") %>%
+    mutate_at(vars(Poor_Ment_Hlth, Total_Records), as.numeric)
+
+statesmhlth$Poor_Ment_Hlth_Proportion <- (statesmhlth$Poor_Ment_Hlth/statesmhlth$Total_Records)
+
+statesmhlthmerge <- left_join(statesmhlth, st_crosswalk, by = "State")
+
+statesmhlth <- statesmhlthmerge[, c(5, 2, 3, 4)]
+
+statesmhlth <- statesmhlth %>% 
+    rename(State = Abb) %>%
+    filter(State != "GU" & State != "PR") %>%
+    arrange(desc(Poor_Ment_Hlth_Proportion))
+
+statesmhlth
+
+```
+
+```{r}
+
+ggplot(statesmhlth) + 
+    geom_bar(aes(x = reorder(State, -Poor_Ment_Hlth_Proportion), y = Poor_Ment_Hlth_Proportion), stat = "identity", width = 0.5) +
+    theme(axis.ticks = element_blank(), axis.text.x = element_text(size = rel(0.5), vjust = 10), axis.text.y = element_text(size = rel(0.8)), plot.subtitle = element_text(size = 7), plot.margin = unit(c(1,1,1,1), "cm"), panel.background = element_blank()) +
+    xlab(NULL) +
+    scale_y_continuous(name = "", limits=c(0, 5)) +
+    labs(title = "State Ranking of Poor Mental Health", subtitle = "Average number of days of poor mental health in the last month per state")
+
+
+```
+
+The results show Alabama also had the worst outcome for mental health. North Dakota had the best.
+
+```{r}
+
+states_add <- left_join(statesmhlth, st_names, by = "State")
+
+mhlthmod <- states_add[, c(5, 2, 3, 4)] %>%
+    rename("region" = "State_Name") %>%
+    mutate(region = tolower(region))
+
+mhlth_map <- left_join(states_map, mhlthmod, by = "region")
+
+ggplot(mhlth_map, aes(long, lat, group = group)) +
+    geom_polygon(aes(fill = Poor_Ment_Hlth_Proportion), color = "black") +
+    theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        rect = element_blank()) +
+    scale_fill_continuous(name = "Days", low = "yellow", high = "red") + 
+    labs(title = "Average number of days of poor mental health")
+
+
+```
+
+
+**Research quesion 2:**
+Which states had the highest and lowest proportion of people ages 18-64 without insurance and is there a relationship between having insurance and experiencing poor physical health? (variables: X_state, X_hcvu651, physhlth) 
+
+```{r}
+
+brfins <- brfss2013 %>%
+    select(X_state, X_hcvu651) %>%
+    group_by(X_state) %>%
+    count(X_hcvu651)
+
+brfins <- na.omit(brfins)
+
+noins <- brfins %>%
+    filter(X_hcvu651 == "Do not have health care coverage") %>%
+    select(X_state, n) %>%
+    rename(State = X_state, Total_Uninsured = n)
+
+staterecs <- brfstates %>%
+    slice(3:n()-1) %>%
+    rename(State = X_state, Total_Records = n)
+
+stateins <- merge(noins, staterecs)
+
+stateinsrank <- stateins %>%
+    mutate(Uninsured_Proportion = Total_Uninsured/Total_Records) %>%
+    arrange(desc(Uninsured_Proportion))
+
+stateinsabb <- left_join(stateinsrank, st_crosswalk, by = "State")
+
+stateinsabb <- stateinsabb %>%
+    rename(State = Abb)
+
+stateinsfinal <- stateinsabb[, c(5, 2, 3, 4)]
+
+stateinsfinal
+
+```
+
+```{r}
+
+
+states_map <- map_data("state")
+
+st_names <- st_crosswalk %>%
+    rename("State_Name" = "State",
+           "State" = "Abb")
+
+states_add <- left_join(stateinsfinal, st_names, by = "State")
+
+insmod <- states_add[, c(5, 2, 3, 4)] %>%
+    rename("region" = "State_Name") %>%
+    mutate(region = tolower(region))
+
+ins_map <- left_join(states_map, insmod, by = "region")
+
+ggplot(ins_map, aes(long, lat, group = group)) +
+    geom_polygon(aes(fill = Uninsured_Proportion), color = "black") +
+    theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        rect = element_blank()) +
+    scale_fill_continuous(name = "Percentage", low = "yellow", high = "red") + 
+    labs(title = "Percentage of people 18-64 in each state without health insurance")
+
+```
+
+Texas had the largest share of uninsured residents age 18-64. Massachusetts had the smallest.
+
+```{r}
+
+inshlth <- left_join(stateinsfinal, statesphlth)
+
+inshlth <- inshlth[, c(1, 3, 2, 4, 5, 6)]
+
+ggplot(inshlth) +
+    geom_point(mapping = aes(x = Uninsured_Proportion, y = Poor_Phys_Hlth_Proportion)) +
+     theme(axis.ticks = element_blank(), plot.margin = unit(c(1,1,1,1), "cm"), plot.subtitle = element_text(size = 7), axis.title.x = element_text(size = 10), axis.title.y = element_text(size = 10), panel.background = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) +
+    xlab("Percentage without health insurance") +
+    ylab("Days") +
+    labs(title = "Physical Health and Insurance Coverage", subtitle = "Average number of days of poor physical health is related to lack of insurance")
+
+```
+
+There appears to be a positive relationship between the number of days of poor physical health and not having insurance coverage.
+
+**Research quesion 3:**
+Do married people have more or fewer number of days of poor mental health?  (variables: marital, menthlth)
+
+```{r}
+
+marmnt <- brfss2013 %>%
+    select(marital, menthlth) %>%
+    mutate(marital = forcats::fct_explicit_na(marital)) %>%
+    group_by(marital) %>%
+    summarise(sum(menthlth, na.rm = TRUE))
+
+marcount <- brfss2013 %>%
+    select(marital) %>%
+    mutate(marital = forcats::fct_explicit_na(marital)) %>%
+    count(marital)
+
+marmntmerge <- merge(marmnt, marcount)
+
+marmntmerge <- marmntmerge[-c(1), ]
+
+marmntmerge <- marmntmerge %>% 
+    rename("Poor_Ment_Hlth" = "sum(menthlth, na.rm = TRUE)", "Total_Records" = "n") 
+marmntmerge$Poor_Ment_Hlth_Proportion <- (marmntmerge$Poor_Ment_Hlth/marmntmerge$Total_Records)
+
+marmntmerge
+
+
+```
+
+```{r}
+
+ggplot(marmntmerge) +
+    geom_bar(aes(x = reorder(marital, -Poor_Ment_Hlth_Proportion), y = Poor_Ment_Hlth_Proportion), stat = "identity") +
+    theme(axis.ticks = element_blank(), axis.text.x = element_text(size = rel(0.5), vjust = 10), axis.text.y = element_text(size = rel(0.8)), plot.subtitle = element_text(size = 7), plot.margin = unit(c(1,1,1,1), "cm"), panel.background = element_blank()) +
+    xlab(NULL) +
+    scale_y_continuous(name = "", limits=c(0, 8)) +
+    labs(title = "Marital Status and Mental Health", subtitle = "Average number of days of poor mental health according to marital status")
+
+```
+
+Separated people have the worst mental health outcomes. Married people have the best.
